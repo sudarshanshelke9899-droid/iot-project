@@ -16,7 +16,9 @@
  * Required Arduino Libraries (Install via Arduino IDE Library Manager):
  *  1. "DHT sensor library" by Adafruit (+ Adafruit Unified Sensor dependency)
  *  2. "LiquidCrystal I2C" by Frank de Brabander / Marco Schwartz
- *  3. "ArduinoJson" (v6 or v7) by Benoit Blanchon
+ * 
+ * Note: JSON encoding and decoding are natively handled in this sketch.
+ * No external ArduinoJson library is required!
  */
 
 #include <ESP8266WiFi.h>
@@ -25,7 +27,6 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
-#include <ArduinoJson.h>
 
 // ==========================================
 // Network & Cloud Server Configurations
@@ -55,6 +56,36 @@ unsigned long lastTelemetryTime = 0;
 String currentLcdLine1 = "Torrent IoT";
 String currentLcdLine2 = "Ready...";
 int currentLedState = 0;
+
+// ==========================================
+// Lightweight Native JSON Parser Helpers
+// (Zero External Dependencies)
+// ==========================================
+
+int extractJsonInt(const String& json, const String& key, int defaultVal) {
+  int keyIndex = json.indexOf("\"" + key + "\"");
+  if (keyIndex == -1) return defaultVal;
+  int colonIndex = json.indexOf(':', keyIndex);
+  if (colonIndex == -1) return defaultVal;
+  int start = colonIndex + 1;
+  while (start < (int)json.length() && (json[start] == ' ' || json[start] == '\t')) start++;
+  int end = start;
+  while (end < (int)json.length() && (isDigit(json[end]) || json[end] == '-')) end++;
+  if (start == end) return defaultVal;
+  return json.substring(start, end).toInt();
+}
+
+String extractJsonString(const String& json, const String& key, const String& defaultVal) {
+  int keyIndex = json.indexOf("\"" + key + "\"");
+  if (keyIndex == -1) return defaultVal;
+  int colonIndex = json.indexOf(':', keyIndex);
+  if (colonIndex == -1) return defaultVal;
+  int firstQuote = json.indexOf('"', colonIndex);
+  if (firstQuote == -1) return defaultVal;
+  int secondQuote = json.indexOf('"', firstQuote + 1);
+  if (secondQuote == -1) return defaultVal;
+  return json.substring(firstQuote + 1, secondQuote);
+}
 
 // ==========================================
 // Helper Functions
@@ -144,18 +175,8 @@ void sendTelemetryAndSync(float temperature, float humidity) {
 
   http.addHeader("Content-Type", "application/json");
 
-  // Create JSON Payload (Compatible with both ArduinoJson v6 and v7)
-#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 7
-  JsonDocument reqDoc;
-#else
-  StaticJsonDocument<256> reqDoc;
-#endif
-
-  reqDoc["temperature"] = temperature;
-  reqDoc["humidity"] = humidity;
-
-  String requestBody;
-  serializeJson(reqDoc, requestBody);
+  // Construct JSON Payload directly without external ArduinoJson dependency
+  String requestBody = "{\"temperature\":" + String(temperature, 1) + ",\"humidity\":" + String(humidity, 1) + "}";
 
   Serial.print("Payload: ");
   Serial.println(requestBody);
@@ -169,34 +190,25 @@ void sendTelemetryAndSync(float temperature, float humidity) {
     Serial.println(response);
 
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
-#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 7
-      JsonDocument resDoc;
-#else
-      StaticJsonDocument<512> resDoc;
-#endif
-      DeserializationError error = deserializeJson(resDoc, response);
-
-      if (!error) {
-        // 1. Process Remote LED Command from Web Dashboard
-        if (resDoc.containsKey("led_state")) {
-          int targetLed = resDoc["led_state"];
-          if (targetLed != currentLedState) {
-            currentLedState = targetLed;
-            digitalWrite(LED_PIN, (currentLedState == 1) ? HIGH : LOW);
-            Serial.printf("💡 LED updated to: %s\n", (currentLedState == 1) ? "ON" : "OFF");
-          }
+      // 1. Process Remote LED Command from Web Dashboard
+      if (response.indexOf("\"led_state\"") != -1) {
+        int targetLed = extractJsonInt(response, "led_state", currentLedState);
+        if (targetLed != currentLedState) {
+          currentLedState = targetLed;
+          digitalWrite(LED_PIN, (currentLedState == 1) ? HIGH : LOW);
+          Serial.printf("💡 LED updated to: %s\n", (currentLedState == 1) ? "ON" : "OFF");
         }
+      }
 
-        // 2. Process Smart LCD Display Text from Web Dashboard
-        String targetLine1 = resDoc["lcd_line1"] | currentLcdLine1;
-        String targetLine2 = resDoc["lcd_line2"] | currentLcdLine2;
+      // 2. Process Smart LCD Display Text from Web Dashboard
+      if (response.indexOf("\"lcd_line1\"") != -1) {
+        String targetLine1 = extractJsonString(response, "lcd_line1", currentLcdLine1);
+        String targetLine2 = extractJsonString(response, "lcd_line2", currentLcdLine2);
 
         if (targetLine1 != currentLcdLine1 || targetLine2 != currentLcdLine2) {
           Serial.println("📟 Updating LCD text from server...");
           updateLcdScreen(targetLine1, targetLine2);
         }
-      } else {
-        Serial.printf("JSON Deserialization failed: %s\n", error.c_str());
       }
     }
   } else {

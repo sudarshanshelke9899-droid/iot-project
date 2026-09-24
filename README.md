@@ -85,7 +85,7 @@ This application is 100% Render deployable:
 2. Install the required libraries via **Sketch -> Include Library -> Manage Libraries...**:
    - `DHT sensor library` by Adafruit
    - `LiquidCrystal I2C` by Frank de Brabander
-   - `ArduinoJson` (v6 or v7) by Benoit Blanchon
+   *(Note: JSON parsing is handled natively without any external JSON libraries!)*
 3. Open the sketch located at:  
    [`arduino/torrent_esp8266/torrent_esp8266.ino`](file:///c:/Users/GCOEY/Desktop/Iot%20Project/arduino/torrent_esp8266/torrent_esp8266.ino)
 4. Configured server endpoint in the sketch:
