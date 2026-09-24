@@ -17,8 +17,8 @@
  *  1. "DHT sensor library" by Adafruit (+ Adafruit Unified Sensor dependency)
  *  2. "LiquidCrystal I2C" by Frank de Brabander / Marco Schwartz
  * 
- * Note: JSON encoding and decoding are natively handled in this sketch.
- * No external ArduinoJson library is required!
+ * Note: JSON serialization and parsing are natively handled in this sketch.
+ * No external JSON library (ArduinoJson) is required!
  */
 
 #include <ESP8266WiFi.h>
@@ -58,8 +58,7 @@ String currentLcdLine2 = "Ready...";
 int currentLedState = 0;
 
 // ==========================================
-// Lightweight Native JSON Parser Helpers
-// (Zero External Dependencies)
+// Helper Functions & Native JSON Parsers
 // ==========================================
 
 int extractJsonInt(const String& json, const String& key, int defaultVal) {
@@ -86,10 +85,6 @@ String extractJsonString(const String& json, const String& key, const String& de
   if (secondQuote == -1) return defaultVal;
   return json.substring(firstQuote + 1, secondQuote);
 }
-
-// ==========================================
-// Helper Functions
-// ==========================================
 
 void connectToWiFi() {
   Serial.println();
@@ -175,7 +170,7 @@ void sendTelemetryAndSync(float temperature, float humidity) {
 
   http.addHeader("Content-Type", "application/json");
 
-  // Construct JSON Payload directly without external ArduinoJson dependency
+  // Construct JSON Payload directly without any external library
   String requestBody = "{\"temperature\":" + String(temperature, 1) + ",\"humidity\":" + String(humidity, 1) + "}";
 
   Serial.print("Payload: ");
@@ -288,3 +283,4 @@ void loop() {
   // Small delay for loop stability
   delay(50);
 }
+
