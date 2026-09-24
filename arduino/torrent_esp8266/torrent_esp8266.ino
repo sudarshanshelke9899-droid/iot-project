@@ -13,35 +13,33 @@
  *      * VCC              -> 5V (or Vin)
  *      * GND              -> GND
  * 
- * Required Arduino Libraries (Install via Library Manager):
- *  1. "DHT sensor library" by Adafruit (plus Adafruit Unified Sensor dependency)
+ * Required Arduino Libraries (Install via Arduino IDE Library Manager):
+ *  1. "DHT sensor library" by Adafruit (+ Adafruit Unified Sensor dependency)
  *  2. "LiquidCrystal I2C" by Frank de Brabander / Marco Schwartz
  *  3. "ArduinoJson" (v6 or v7) by Benoit Blanchon
  */
 
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
 #include <ArduinoJson.h>
 
 // ==========================================
-// Network & Hardware Configurations
+// Network & Cloud Server Configurations
 // ==========================================
 const char* ssid     = "COE YAVATMAL";
 const char* password = "shoaib845";
 
-// Configure your backend server URL:
-// For local testing on same WiFi: "http://<YOUR_PC_LOCAL_IP>:3000/api/device/telemetry"
-// For Render cloud deployment:   "https://<YOUR-APP-NAME>.onrender.com/api/device/telemetry"
-const char* serverEndpoint = "http://192.168.1.100:3000/api/device/telemetry";
+// Render Cloud Deployment Telemetry Endpoint
+const char* serverEndpoint = "https://iot-project-zb89.onrender.com/api/device/telemetry";
 
 // Pin Definitions
 #define DHTPIN D5         // DHT11 Data Pin connected to D5 (GPIO 14)
-#define DHTTYPE DHT11     // DHT 11
-#define LED_PIN D0        // LED connected to D0 (GPIO 16)
+#define DHTTYPE DHT11     // DHT11 Sensor
+#define LED_PIN D0        // LED Indicator connected to D0 (GPIO 16)
 #define I2C_SDA D2        // I2C SDA connected to D2 (GPIO 4)
 #define I2C_SCL D1        // I2C SCL connected to D1 (GPIO 5)
 
@@ -49,7 +47,7 @@ const char* serverEndpoint = "http://192.168.1.100:3000/api/device/telemetry";
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 DHT dht(DHTPIN, DHTTYPE);
 
-// Interval Configuration (10 seconds)
+// Interval Configuration (Sync every 10 seconds)
 const unsigned long TELEMETRY_INTERVAL_MS = 10000;
 unsigned long lastTelemetryTime = 0;
 
@@ -100,13 +98,13 @@ void connectToWiFi() {
     lcd.setCursor(0, 0);
     lcd.print("WiFi Failed!");
     lcd.setCursor(0, 1);
-    lcd.print("Check Credentials");
+    lcd.print("Check WiFi/Pass");
     delay(2000);
   }
 }
 
 void updateLcdScreen(String line1, String line2) {
-  // Pad strings to 16 characters for clean overwriting
+  // Pad strings to 16 characters for clean overwriting without flicker
   while (line1.length() < 16) line1 += " ";
   while (line2.length() < 16) line2 += " ";
 
@@ -128,18 +126,31 @@ void sendTelemetryAndSync(float temperature, float humidity) {
     return;
   }
 
-  WiFiClient client;
+  // Use WiFiClientSecure for HTTPS connection to Render cloud
+  WiFiClientSecure client;
+  client.setInsecure(); // Bypass TLS certificate chain verification for ESP8266
+
   HTTPClient http;
+  http.setTimeout(15000); // 15 second timeout to handle potential Render cold starts
 
   Serial.println("\n-------------------------------------------");
   Serial.print("Sending DHT11 Telemetry to: ");
   Serial.println(serverEndpoint);
 
-  http.begin(client, serverEndpoint);
+  if (!http.begin(client, serverEndpoint)) {
+    Serial.println("❌ HTTP begin failed. Unable to connect to host.");
+    return;
+  }
+
   http.addHeader("Content-Type", "application/json");
 
-  // Create JSON Payload
+  // Create JSON Payload (Compatible with both ArduinoJson v6 and v7)
+#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 7
+  JsonDocument reqDoc;
+#else
   StaticJsonDocument<256> reqDoc;
+#endif
+
   reqDoc["temperature"] = temperature;
   reqDoc["humidity"] = humidity;
 
@@ -153,41 +164,43 @@ void sendTelemetryAndSync(float temperature, float humidity) {
 
   if (httpCode > 0) {
     String response = http.getString();
-    Serial.print("HTTP Response Code: ");
-    Serial.println(httpCode);
+    Serial.printf("HTTP Response Code: %d\n", httpCode);
     Serial.print("Server Response: ");
     Serial.println(response);
 
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_CREATED) {
+#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 7
+      JsonDocument resDoc;
+#else
       StaticJsonDocument<512> resDoc;
+#endif
       DeserializationError error = deserializeJson(resDoc, response);
 
       if (!error) {
-        // 1. Process LED State
+        // 1. Process Remote LED Command from Web Dashboard
         if (resDoc.containsKey("led_state")) {
           int targetLed = resDoc["led_state"];
           if (targetLed != currentLedState) {
             currentLedState = targetLed;
             digitalWrite(LED_PIN, (currentLedState == 1) ? HIGH : LOW);
-            Serial.printf("LED updated to: %s\n", (currentLedState == 1) ? "ON" : "OFF");
+            Serial.printf("💡 LED updated to: %s\n", (currentLedState == 1) ? "ON" : "OFF");
           }
         }
 
-        // 2. Process Smart LCD Display Text
+        // 2. Process Smart LCD Display Text from Web Dashboard
         String targetLine1 = resDoc["lcd_line1"] | currentLcdLine1;
         String targetLine2 = resDoc["lcd_line2"] | currentLcdLine2;
 
         if (targetLine1 != currentLcdLine1 || targetLine2 != currentLcdLine2) {
-          Serial.println("Updating LCD text from server...");
+          Serial.println("📟 Updating LCD text from server...");
           updateLcdScreen(targetLine1, targetLine2);
         }
       } else {
-        Serial.print("JSON Deserialization failed: ");
-        Serial.println(error.f_str());
+        Serial.printf("JSON Deserialization failed: %s\n", error.c_str());
       }
     }
   } else {
-    Serial.printf("HTTP POST Failed, error: %s\n", http.errorToString(httpCode).c_str());
+    Serial.printf("❌ HTTP POST Failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
 
   http.end();
@@ -253,7 +266,6 @@ void loop() {
     // Check if any reads failed
     if (isnan(humidity) || isnan(temperature)) {
       Serial.println("⚠️ Warning: Failed to read data from DHT11 sensor! Checking wiring on D5...");
-      // Still notify server with -1 or skip
     } else {
       Serial.printf("DHT11 Reading -> Temp: %.1f C | Humidity: %.1f %%\n", temperature, humidity);
       // Send to server and receive updated LED/LCD commands
@@ -261,6 +273,6 @@ void loop() {
     }
   }
 
-  // Small delay for stability
+  // Small delay for loop stability
   delay(50);
 }

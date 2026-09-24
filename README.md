@@ -75,7 +75,7 @@ This application is 100% Render deployable:
      - `PORT`: `10000`
      - `JWT_SECRET`: *(Generate a secure random string or use the default in render.yaml)*
 6. Once deployed, Render will provide a public URL like:  
-   `https://torrent-iot.onrender.com`
+   `https://iot-project-zb89.onrender.com`
 
 ---
 
@@ -88,8 +88,8 @@ This application is 100% Render deployable:
    - `ArduinoJson` (v6 or v7) by Benoit Blanchon
 3. Open the sketch located at:  
    [`arduino/torrent_esp8266/torrent_esp8266.ino`](file:///c:/Users/GCOEY/Desktop/Iot%20Project/arduino/torrent_esp8266/torrent_esp8266.ino)
-4. Update the server URL in the sketch:
-   - For Render: `const char* serverEndpoint = "https://<your-render-app>.onrender.com/api/device/telemetry";`
+4. Configured server endpoint in the sketch:
+   - Live Render Cloud Endpoint: `const char* serverEndpoint = "https://iot-project-zb89.onrender.com/api/device/telemetry";`
    - For Local testing: `const char* serverEndpoint = "http://<YOUR_LOCAL_PC_IP>:3000/api/device/telemetry";`
 5. Select your board (**NodeMCU 1.0 (ESP-12E Module)**) and COM Port.
 6. Click **Upload**.
